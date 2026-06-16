@@ -1,0 +1,19 @@
+system:
+  name: "H_i in a-SiO2"
+  dielectric: 3.9
+  VBM: 0.0
+  gap: 5.72
+  elements: [Si, O, H]
+  chemical_potential:
+    Si: -107.28
+    O: -435.32
+    H: -15.89
+
+formation_energy:
+  charge: [-1, 1]
+  e_corr: true
+
+band_alignment:
+  E_VBM: -0.684852
+  E_VBM_Si: 4.6
+  E_CBM_Si: 5.72

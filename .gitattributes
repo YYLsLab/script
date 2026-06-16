@@ -1,0 +1,13 @@
+# 自动处理换行符
+* text=auto
+
+# 强制脚本和代码文件使用 LF
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# 二进制文件不处理
+*.x binary
+*.pdf binary
