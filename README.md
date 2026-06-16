@@ -2,6 +2,193 @@
 
 PWmat 第一性原理缺陷计算后处理工具集。
 
+## 项目简介
+
+本项目为 **PWmat 第一性原理缺陷计算** 提供完整的后处理工具链，涵盖：
+
+- 缺陷电荷修正（ICIC + PA 方法）
+- 形成能计算与费米能级绘图
+- 热力学缺陷转变能级计算
+- 化学势允许范围分析
+- 重组能提取与组态坐标图（CCD）绘制
+
+---
+
+## 目录结构
+
+| 目录 | 说明 |
+|------|------|
+| `zrq/` | HPC 集群自动化缺陷计算流程（Slurm 作业脚本） |
+| `zy/` | 独立形成能绘制脚本（包含使用说明 PDF） |
+| `xgh2/` | **可独立使用的通用脚本（推荐）**，通过 `-i`/`-o` 显式指定输入输出路径，适配任意目录结构 |
+| `xgh1/` | 项目内工作流脚本集，依赖固定项目目录结构 |
+
+> 详细使用说明见 [`xgh2/README.md`](xgh2/README.md)
+
+---
+
+## 环境要求
+
+- **操作系统**：Linux（集群环境）或 macOS / Windows（本地分析）
+- **Python 3.6+**
+- **PWmat**：第一性原理计算软件
+- **Slurm**（可选）：HPC 作业调度系统
+
+### Python 依赖
+
+```bash
+pip install numpy pyyaml matplotlib pandas
+```
+
+| 包 | 用途 |
+|----|------|
+| `numpy` | 数值计算、矩阵运算 |
+| `PyYAML` | 读写 YAML 配置文件 |
+| `matplotlib` | 绘制形成能图、CCD 图 |
+| `pandas` | 数据处理与导出 |
+
+---
+
+## 快速开始
+
+### 1. 准备工作
+
+确保已完成 PWmat 缺陷计算，目录结构如下：
+
+```
+project/
+├── bulk/scf/          # 完美超胞 SCF 计算
+├── q0/scf/            # 中性缺陷 SCF 计算
+├── q1/scf/            # +1 带电缺陷 SCF 计算
+├── qm1/scf/           # -1 带电缺陷 SCF 计算
+├── config.yaml        # 项目配置文件
+└── chemical/          # 竞争相总能数据（可选）
+```
+
+### 2. 生成缺陷修正输入文件
+
+```bash
+# 生成 defect.input（缺陷位置文件）
+python xgh2/generate_defect_input.py \
+    -ibulk bulk/scf \
+    -iq0 q0/scf \
+    -iq1 q1/scf \
+    -o defect_inputs/
+
+# 生成 occ.input（占据数分析）
+python xgh2/generate_occ.py \
+    -i q0/scf \
+    -o occ.input
+```
+
+### 3. 计算 ICIC + PA 电荷修正
+
+在 HPC 上依次运行 `1_get_rho.sh` → `2_coulomb_integral.sh` → `3_get_results.sh`，或使用独立版脚本：
+
+```bash
+python xgh2/correction.py collect \
+    -ibulk bulk/scf \
+    -iq0 q0/scf \
+    -iq1 q1/scf \
+    -iqm1 qm1/scf \
+    -o result/correction_results.yaml
+```
+
+### 4. 计算化学势允许范围（可选）
+
+```bash
+python xgh2/calculate_chemical_potential_bounds.py \
+    -i chemical \
+    -o result/chemical_potential_bounds.yaml \
+    --target SiO2
+```
+
+### 5. 计算形成能与转变能级
+
+```bash
+python xgh2/formation_energy.py \
+    -i result/correction_results.yaml \
+    -o result/defect_results.yaml
+```
+
+### 6. 绘制组态坐标图（CCD）
+
+```bash
+# 提取重组能
+python xgh2/extract_reorganization_energy.py \
+    --method structural_relaxation \
+    --defect v_O --charge 1 \
+    -i q1/relax/RELAXSTEPS q1/S21/RELAXSTEPS \
+    -o result/reorganization_energy.log
+
+# 计算 ΔQ
+python xgh2/calculate_deltaQ_config.py \
+    -c0 atom_config_0 \
+    -cq atom_config_q \
+    -o result/deltaQ.log
+
+# 绘制 CCD
+python xgh2/plot_ccd.py \
+    -i result/reorganization_energy.log \
+    --deltaQ 2.4 \
+    --defect v_O --charge 1 \
+    -o result/ccd/v_O.png
+```
+
+---
+
+## 工作流程图
+
+```
+PWmat DFT 计算
+      │
+      ▼
+generate_defect_input.py  ──→  defect.input
+generate_occ.py           ──→  occ.input / IN.OCC
+      │
+      ▼
+1_get_rho.sh → 2_coulomb_integral.sh → 3_get_results.sh
+  （或 xgh1/ 中的 batch_correction.py 批量处理）
+      │
+      ▼
+correction.py collect  ──→  correction_results.yaml
+      │
+      ▼
+calculate_chemical_potential_bounds.py（可选）
+      │
+      ▼
+formation_energy.py  ──→  defect_results.yaml  +  形成能图
+      │
+      ▼
+extract_reorganization_energy.py  →  calculate_deltaQ_config.py  →  plot_ccd.py
+```
+
+---
+
+## 核心脚本一览
+
+| 脚本 | 功能 |
+|------|------|
+| `generate_defect_input.py` | 自动生成缺陷位置文件 `defect.input` |
+| `generate_occ.py` | 分析占据数，生成 `occ.input` 和 `IN.OCC` |
+| `correction.py` | ICIC + PA 电荷修正（prepare / collect / all） |
+| `formation_energy.py` | 形成能计算与费米能级绘图 |
+| `calculate_chemical_potential_bounds.py` | 化学势允许范围计算 |
+| `extract_reorganization_energy.py` | 重组能提取（两种方法） |
+| `calculate_deltaQ_config.py` | 组态坐标 ΔQ 计算 |
+| `plot_ccd.py` | 二维组态坐标图绘制 |
+| `batch_correction.py` | 批量缺陷修正处理 |
+| `export_transition_levels.py` | 转变能级导出为 CSV |
+
+---
+
+## 使用提示
+
+- **推荐优先使用 `xgh2/` 中的脚本**，通过 `-i`/`-o` 显式指定输入输出，适配不同项目结构
+- 每个脚本都支持 `--help` 查看参数说明
+- 详细使用说明见 [`xgh2/README.md`](xgh2/README.md)
+- `xgh1/` 中的脚本适用于已有固定项目目录结构的情况
+
 ---
 
 ## Git 基础操作
@@ -264,192 +451,3 @@ calculate/
 .DS_Store
 Thumbs.db
 ```
-
----
-
-## 项目简介
-
-本项目为 **PWmat 第一性原理缺陷计算** 提供完整的后处理工具链，涵盖：
-
-- 缺陷电荷修正（ICIC + PA 方法）
-- 形成能计算与费米能级绘图
-- 热力学缺陷转变能级计算
-- 化学势允许范围分析
-- 重组能提取与组态坐标图（CCD）绘制
-
----
-
-## 目录结构
-
-| 目录 | 说明 |
-|------|------|
-| `zrq/` | HPC 集群自动化缺陷计算流程（Slurm 作业脚本） |
-| `zy/` | 独立形成能绘制脚本（包含使用说明 PDF） |
-| `xgh2/` | **可独立使用的通用脚本（推荐）**，通过 `-i`/`-o` 显式指定输入输出路径，适配任意目录结构 |
-| `xgh1/` | 项目内工作流脚本集，依赖固定项目目录结构 |
-
-> 详细使用说明见 [`xgh2/README.md`](xgh2/README.md)
-
----
-
-## 环境要求
-
-- **操作系统**：Linux（集群环境）或 macOS / Windows（本地分析）
-- **Python 3.6+**
-- **PWmat**：第一性原理计算软件
-- **Slurm**（可选）：HPC 作业调度系统
-
-### Python 依赖
-
-```bash
-pip install numpy pyyaml matplotlib pandas
-```
-
-| 包 | 用途 |
-|----|------|
-| `numpy` | 数值计算、矩阵运算 |
-| `PyYAML` | 读写 YAML 配置文件 |
-| `matplotlib` | 绘制形成能图、CCD 图 |
-| `pandas` | 数据处理与导出 |
-
----
-
-## 快速开始
-
-### 1. 准备工作
-
-确保已完成 PWmat 缺陷计算，目录结构如下：
-
-```
-project/
-├── bulk/scf/          # 完美超胞 SCF 计算
-├── q0/scf/            # 中性缺陷 SCF 计算
-├── q1/scf/            # +1 带电缺陷 SCF 计算
-├── qm1/scf/           # -1 带电缺陷 SCF 计算
-├── config.yaml        # 项目配置文件
-└── chemical/          # 竞争相总能数据（可选）
-```
-
-### 2. 生成缺陷修正输入文件
-
-```bash
-# 生成 defect.input（缺陷位置文件）
-python xgh2/generate_defect_input.py \
-    -ibulk bulk/scf \
-    -iq0 q0/scf \
-    -iq1 q1/scf \
-    -o defect_inputs/
-
-# 生成 occ.input（占据数分析）
-python xgh2/generate_occ.py \
-    -i q0/scf \
-    -o occ.input
-```
-
-### 3. 计算 ICIC + PA 电荷修正
-
-在 HPC 上依次运行 `1_get_rho.sh` → `2_coulomb_integral.sh` → `3_get_results.sh`，或使用独立版脚本：
-
-```bash
-python xgh2/correction.py collect \
-    -ibulk bulk/scf \
-    -iq0 q0/scf \
-    -iq1 q1/scf \
-    -iqm1 qm1/scf \
-    -o result/correction_results.yaml
-```
-
-### 4. 计算化学势允许范围（可选）
-
-```bash
-python xgh2/calculate_chemical_potential_bounds.py \
-    -i chemical \
-    -o result/chemical_potential_bounds.yaml \
-    --target SiO2
-```
-
-### 5. 计算形成能与转变能级
-
-```bash
-python xgh2/formation_energy.py \
-    -i result/correction_results.yaml \
-    -o result/defect_results.yaml
-```
-
-### 6. 绘制组态坐标图（CCD）
-
-```bash
-# 提取重组能
-python xgh2/extract_reorganization_energy.py \
-    --method structural_relaxation \
-    --defect v_O --charge 1 \
-    -i q1/relax/RELAXSTEPS q1/S21/RELAXSTEPS \
-    -o result/reorganization_energy.log
-
-# 计算 ΔQ
-python xgh2/calculate_deltaQ_config.py \
-    -c0 atom_config_0 \
-    -cq atom_config_q \
-    -o result/deltaQ.log
-
-# 绘制 CCD
-python xgh2/plot_ccd.py \
-    -i result/reorganization_energy.log \
-    --deltaQ 2.4 \
-    --defect v_O --charge 1 \
-    -o result/ccd/v_O.png
-```
-
----
-
-## 工作流程图
-
-```
-PWmat DFT 计算
-      │
-      ▼
-generate_defect_input.py  ──→  defect.input
-generate_occ.py           ──→  occ.input / IN.OCC
-      │
-      ▼
-1_get_rho.sh → 2_coulomb_integral.sh → 3_get_results.sh
-  （或 xgh1/ 中的 batch_correction.py 批量处理）
-      │
-      ▼
-correction.py collect  ──→  correction_results.yaml
-      │
-      ▼
-calculate_chemical_potential_bounds.py（可选）
-      │
-      ▼
-formation_energy.py  ──→  defect_results.yaml  +  形成能图
-      │
-      ▼
-extract_reorganization_energy.py  →  calculate_deltaQ_config.py  →  plot_ccd.py
-```
-
----
-
-## 核心脚本一览
-
-| 脚本 | 功能 |
-|------|------|
-| `generate_defect_input.py` | 自动生成缺陷位置文件 `defect.input` |
-| `generate_occ.py` | 分析占据数，生成 `occ.input` 和 `IN.OCC` |
-| `correction.py` | ICIC + PA 电荷修正（prepare / collect / all） |
-| `formation_energy.py` | 形成能计算与费米能级绘图 |
-| `calculate_chemical_potential_bounds.py` | 化学势允许范围计算 |
-| `extract_reorganization_energy.py` | 重组能提取（两种方法） |
-| `calculate_deltaQ_config.py` | 组态坐标 ΔQ 计算 |
-| `plot_ccd.py` | 二维组态坐标图绘制 |
-| `batch_correction.py` | 批量缺陷修正处理 |
-| `export_transition_levels.py` | 转变能级导出为 CSV |
-
----
-
-## 使用提示
-
-- **推荐优先使用 `xgh2/` 中的脚本**，通过 `-i`/`-o` 显式指定输入输出，适配不同项目结构
-- 每个脚本都支持 `--help` 查看参数说明
-- 详细使用说明见 [`xgh2/README.md`](xgh2/README.md)
-- `xgh1/` 中的脚本适用于已有固定项目目录结构的情况
