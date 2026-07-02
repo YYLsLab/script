@@ -74,9 +74,9 @@ def read_atom_config(filename: str) -> Tuple[int, List[int], np.ndarray, np.ndar
 
     # 读取晶格向量
     lattice = np.array([
-        [float(x) for x in lines[2].split()],
-        [float(x) for x in lines[3].split()],
-        [float(x) for x in lines[4].split()]
+        [float(x) for x in lines[2].split()[0:3]],
+        [float(x) for x in lines[3].split()[0:3]],
+        [float(x) for x in lines[4].split()[0:3]]
     ])
 
     # 读取原子位置
